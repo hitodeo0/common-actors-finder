@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>共通出演者ファインダー</title>
+<!--
+  ※ file:// で動かない環境では `python -m http.server` で配信して
+     http://localhost:8000/common_actors.html を開くと確実。
+-->
+<link rel="stylesheet" href="common_actors.css">
+</head>
+<body>
+<div class="wrap">
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+    <h1>共通出演者ファインダー </h1>
+    <button class="mini" id="themeBtn" type="button">☀ ライト</button>
+  </div>
+  <p class="sub">複数の作品に共通して関わった俳優・声優・監督などを、ブラウザから Wikidata + Wikipedia を直接検索して探します。</p>
+
+  <div class="card">
+    <label class="fld">作品（2つ以上）— 正式名称でなくてもOK（略称・通称・英題・Q番号も可）</label>
+    <div id="works"></div>
+    <button class="icon" id="addWork" type="button">＋ 作品を追加</button>
+
+    <div class="opts" style="margin-top:16px;">
+      <fieldset>
+        <legend>役割
+          <span class="legend-actions">
+            <button class="mini" id="roleAll" type="button">全選択</button>
+            <button class="mini" id="roleNone" type="button">全解除</button>
+            <button class="mini" id="roleDef" type="button">デフォルト</button>
+          </span>
+        </legend>
+        <div id="roles"></div>
+      </fieldset>
+      <fieldset>
+        <legend>参照するWikipedia言語 — 増やすと実行時間が長くなります
+          <span class="legend-actions">
+            <button class="mini" id="langAll" type="button">全選択</button>
+            <button class="mini" id="langNone" type="button">全解除</button>
+          </span>
+        </legend>
+        <div class="presets">
+          <span class="presets-label">プリセット:</span>
+          <span id="langPresets"></span>
+        </div>
+        <div id="wlangs"></div>
+      </fieldset>
+      <fieldset>
+        <legend>オプション</legend>
+        <span class="chk"><input type="checkbox" id="lazy">高速モード（Wikidataで十分なら省略）</span>
+      </fieldset>
+    </div>
+
+    <div class="row-actions">
+      <button class="primary" id="run" type="button">比較する</button>
+      <span id="status"></span>
+    </div>
+  </div>
+
+  <div id="result"></div>
+
+  <footer class="about card">
+    <strong>このツールについて / プライバシー</strong>
+    <div class="about-sec">
+      <h4>データ出典に関して</h4>
+      <ul>
+        <li>出典: Wikidata / Wikipedia（ウィキメディア財団）。</li>
+        <li>⚠ これらは誰でも編集できる百科事典のため、<strong>内容が間違っていたり、抜けていたり、最新でないことがあります</strong>。結果は参考程度にご利用ください。</li>
+      </ul>
+    </div>
+
+    <div class="about-sec">
+      <h4>データの保存に関して</h4>
+      <ul>
+        <li>当サイト（運営者）はユーザーの入力内容・閲覧情報を<strong>収集・保存しません</strong>。Cookie やアクセス解析は使用していません。</li>
+        <li>ブラウザに保存するのは画面テーマ（ライト/ダーク）の設定だけで、端末内（localStorage）に留まり外部へ送信されません。</li>
+        <li>取得したデータは一時的にブラウザのメモリにキャッシュされ、ページを再読み込みすると消えます。</li>
+      </ul>
+    </div>
+
+    <div class="about-sec">
+      <h4>データの送信に関して</h4>
+      <ul>
+        <li>サーバー側の処理はありません。配信されるのは静的な HTML/CSS/JS だけで、検索は<strong>ユーザーのブラウザから直接</strong> Wikidata・Wikipedia（ウィキメディア財団）へ問い合わせます。</li>
+        <li>※ 検索ワードと接続元IP は、データ提供元であるウィキメディア財団のサーバーには（Wikipediaを直接閲覧するのと同じく）届きます。<strong>当サイト運営者には届きません。</strong></li>
+        <li>提供元サーバーへの負担を抑えるため、問い合わせは「一度に1件ずつ送る」「混雑・失敗時は間隔をあけて再試行する」「取得済みのデータは再取得せずキャッシュを使う」ようにしています。</li>
+      </ul>
+    </div>
+
+    <div class="about-sec">
+      <h4>作った人</h4>
+      <ul>
+        <li>海星 (<a href="https://x.com/hitodeo0" target="_blank">X</a> / <a href="https://hitodeo0.github.io/shinkai11000m/" target="_blank">Site</a>)</li>
+      </ul>
+    </div>
+  </footer>
+</div>
+
+<script src="common_actors.js"></script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+/* common_actors.css — 共通出演者ファインダー（JS版）のスタイル */
+/* ダーク（既定） */
+:root { --bg:#0f1115; --card:#1a1d24; --fg:#e6e6e6; --muted:#9aa0aa;
+        --accent:#5b9dff; --line:#2a2e38; --input:#11141a; color-scheme:dark; }
+/* ライト（data-theme="light" で切替） */
+:root[data-theme="light"] { --bg:#f6f7f9; --card:#ffffff; --fg:#1a1d24; --muted:#5c6470;
+        --accent:#2f6fed; --line:#dde1e8; --input:#eef1f6; color-scheme:light; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+       font-family:system-ui,"Segoe UI",sans-serif; line-height:1.6; }
+.wrap { max-width:860px; margin:0 auto; padding:24px 16px 60px; }
+h1 { font-size:1.4rem; margin:0 0 4px; }
+p.sub { color:var(--muted); margin:0 0 20px; font-size:.9rem; }
+.card { background:var(--card); border:1px solid var(--line);
+        border-radius:12px; padding:18px; margin-bottom:18px; }
+label.fld { display:block; font-size:.85rem; color:var(--muted); margin:10px 0 4px; }
+input[type=text] { width:100%; padding:9px 11px; border-radius:8px;
+      border:1px solid var(--line); background:var(--input); color:var(--fg); font-size:1rem; }
+.work-row { display:flex; gap:8px; margin-bottom:8px; align-items:center; }
+.work-row input { flex:1; }
+button { cursor:pointer; border:none; border-radius:8px; padding:9px 14px;
+         font-size:.95rem; background:var(--line); color:var(--fg); }
+button.primary { background:var(--accent); color:#06101f; font-weight:600; }
+button.icon { padding:6px 11px; }
+button.mini { padding:3px 9px; font-size:.78rem; }
+.opts { display:flex; flex-wrap:wrap; gap:14px 22px; margin-top:6px; }
+.opts fieldset { border:1px solid var(--line); border-radius:8px; padding:8px 12px; margin:0; }
+.opts legend { color:var(--muted); font-size:.8rem; padding:0 4px; }
+.chk { display:inline-flex; align-items:center; gap:5px; margin-right:12px; font-size:.9rem; }
+.legend-actions { display:inline-flex; gap:6px; margin-left:8px; }
+.presets { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:2px 0 8px; }
+.presets-label { font-size:.78rem; color:var(--muted); margin-right:2px; }
+.row-actions { display:flex; gap:10px; align-items:center; margin-top:14px; }
+#status { color:var(--muted); font-size:.9rem; min-height:1.4em; }
+table { width:100%; border-collapse:collapse; margin-top:6px; }
+th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line);
+        vertical-align:top; font-size:.93rem; }
+th { color:var(--muted); font-weight:600; }
+.qid { color:var(--muted); font-size:.8rem; }
+a { color:var(--accent); text-decoration:none; }
+.pill { display:inline-block; background:var(--input); border:1px solid var(--line);
+        border-radius:6px; padding:1px 7px; margin:1px 3px 1px 0; font-size:.82rem; }
+.warn { color:#ffcf6b; font-size:.85rem; }
+.spin { display:inline-block; width:14px; height:14px; border:2px solid var(--line);
+        border-top-color:var(--accent); border-radius:50%; animation:r .8s linear infinite;
+        vertical-align:-2px; margin-right:6px; }
+@keyframes r { to { transform:rotate(360deg); } }
+.muted { color:var(--muted); }
+.about { font-size:.82rem; color:var(--muted); }
+.about strong { color:var(--fg); }
+.about ul { margin:4px 0 0; padding-left:1.1em; }
+.about li { margin:4px 0; }
+.about-sec { margin-top:14px; }
+.about-sec h4 { margin:0; font-size:.86rem; font-weight:600; color:var(--fg);
+                border-left:3px solid var(--accent); padding-left:8px; }
