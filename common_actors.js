@@ -182,7 +182,9 @@ async function filterWorkQids(qids) {
   const classes = WORK_CLASSES.map(c => "wd:" + c).join(" ");
   const rows = await sparql(
     `SELECT DISTINCT ?item WHERE { VALUES ?item { ${values} } `
-    + `VALUES ?cls { ${classes} } ?item wdt:P31/wdt:P279* ?cls . }`);
+    + `VALUES ?cls { ${classes} } ?item wdt:P31/wdt:P279* ?cls . `
+    + `FILTER NOT EXISTS { ?item wdt:P31 wd:Q4167410 } `    // 曖昧さ回避ページを除外
+    + `FILTER NOT EXISTS { ?item wdt:P31 wd:Q13406463 } }`); // 一覧記事を除外
   return new Set(rows.map(b => qval(b.item)));
 }
 
@@ -395,10 +397,18 @@ function extractCastLinks(text, cfg) {
     }
   }
   const sections = text.split(/^(={2,}\s*.+?\s*={2,})\s*$/m);
+  // キャスト見出しの配下サブセクションも対象にするため、見出しレベルを継承する
+  let relLevel = 0, dubLevel = 0;
   for (let i = 1; i < sections.length; i += 2) {
     const heading = sections[i], body = sections[i + 1] || "";
-    const isDub = cfg.dubSection && cfg.dubSection.test(heading);  // 吹替セクション
-    const relevant = cfg.section.test(heading) || isDub;
+    const level = (heading.match(/^=+/) || ["="])[0].length;
+    // 同レベル以上の見出しに来たら、それまでのキャスト/吹替ブロックを抜ける
+    if (relLevel && level <= relLevel) relLevel = 0;
+    if (dubLevel && level <= dubLevel) dubLevel = 0;
+    if (cfg.section.test(heading)) relLevel = level;
+    if (cfg.dubSection && cfg.dubSection.test(heading)) dubLevel = level;
+    const isDub = dubLevel > 0;                 // 吹替セクション（配下も含む）
+    const relevant = relLevel > 0 || isDub;     // キャスト関連（配下も含む）
     const target = relevant ? body : heading + body;
     for (const m of target.matchAll(MAIN_TMPL)) {
       const name = m[1].split("#")[0].trim();
