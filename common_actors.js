@@ -186,31 +186,38 @@ async function filterWorkQids(qids) {
   return new Set(rows.map(b => qval(b.item)));
 }
 
-function queryVariants(title) {
-  title = title.trim();
-  const variants = [];
-  const add = s => { s = (s || "").trim(); if (s && !variants.includes(s)) variants.push(s); };
-
-  // 末尾の曖昧さ回避括弧を除去:「X (2009年の映画)」「X（アニメ）」→「X」
-  let base = title;
+// 末尾の曖昧さ回避括弧を除去:「X (2009年の映画)」「X（アニメ）」→「X」
+function stripParen(title) {
+  let base = title.trim();
   for (;;) {
-    const stripped = base.replace(/[（(][^（）()]*[）)]\s*$/, "").trim();
-    if (stripped === base) break;
-    base = stripped;
+    const s = base.replace(/[（(][^（）()]*[）)]\s*$/, "").trim();
+    if (s === base) break;
+    base = s;
   }
+  return base;
+}
 
-  add(title);            // 原文（括弧つきのまま）
-  add(base);             // 括弧を除去した形
-  // 区切り文字（/ ／ ・ : ：）の表記ゆれを吸収（例: アベンジャーズ/エンドゲーム → ・形）
-  const SEP = /[/／・:：]/g;
+// 表記ゆれ吸収用の検索語（区切り文字を入れ替えた形。トリミングはしない）
+function normalizedVariants(title) {
+  const out = [];
+  const add = s => { s = (s || "").trim(); if (s && !out.includes(s)) out.push(s); };
+  const base = stripParen(title);
+  add(title); add(base);
+  const SEP = /[/／・:：]/g;   // 「アベンジャーズ/エンドゲーム」→「・」形など
   add(base.replace(SEP, "・"));
   add(base.replace(SEP, "/"));
   add(base.replace(SEP, " "));
   add(base.replace(SEP, ""));
-  // 最後の手段: 空白で区切って末尾語を順に落とす（副題対策。/ や ・ では割らない）
-  const parts = base.split(/[\s　]+/).filter(Boolean);
+  return out;
+}
+
+// 最後の手段: 空白で区切って末尾語を順に落とす（副題対策。/ や ・ では割らない）
+function trimVariants(title) {
+  const out = [];
+  const add = s => { s = (s || "").trim(); if (s && !out.includes(s)) out.push(s); };
+  const parts = stripParen(title).split(/[\s　]+/).filter(Boolean);
   for (let k = parts.length - 1; k > 0; k--) add(parts.slice(0, k).join(" "));
-  return variants;
+  return out;
 }
 
 // Wikipedia記事タイトル → Wikidata QID（曖昧さ回避括弧つきの記事名も正確に解決）
@@ -234,39 +241,86 @@ async function getEntityInfo(qid, lang) {
   return { label: lbl, description: dsc };
 }
 
-async function resolveQid(title, lang) {
-  // 1) まず Wikipedia 記事タイトルとして直接解決（記事名そのもの・曖昧さ回避括弧つきに強い）。
-  //    記事が「作品」型のときだけ採用し、キャラクター等の場合は通常検索へ回す。
-  for (const wl of [lang, "en"]) {
-    const qid = await resolveViaWiki(title, wl);
-    if (qid && (await filterWorkQids([qid])).has(qid)) {
-      const info = await getEntityInfo(qid, lang);
-      return { qid, label: info.label, description: info.description,
-               is_work: true, matched_query: title };
-    }
-  }
+// Wikipedia全文検索(CirrusSearch)で記事を探しQID配列を返す。
+// 中黒(・)やスペースの揺れに強い（例:「スターウォーズ」→「スター・ウォーズ」）。
+async function searchWiki(title, wikiLang) {
+  const url = apiURL(`https://${wikiLang}.wikipedia.org/w/api.php`, {
+    action: "query", generator: "search", gsrsearch: title, gsrlimit: 6,
+    gsrnamespace: 0, prop: "pageprops", ppprop: "wikibase_item", formatversion: 2 });
+  let j;
+  try { j = await getJSON(url); } catch (e) { return []; }
+  const pages = (j.query && j.query.pages) || [];
+  pages.sort((a, b) => (a.index || 99) - (b.index || 99));   // 検索順位
+  return pages
+    .map(p => ({ qid: p.pageprops && p.pageprops.wikibase_item, title: p.title }))
+    .filter(x => x.qid);
+}
 
-  // 2) Wikidata検索（別名・略称・表記ゆれに強い）
+// 区切り文字・大小文字を無視した比較用キー
+const normKey = s => (s || "").replace(/[\s　・:：/／〜~‐–—-]/g, "").toLowerCase();
+
+async function infoFromQid(qid, lang, matched) {
+  const info = await getEntityInfo(qid, lang);
+  return { qid, label: info.label, description: info.description,
+           is_work: true, matched_query: matched };
+}
+
+async function resolveQid(title, lang) {
   // 「(2009年の映画)」等の括弧内にある年を、候補の絞り込みヒントに使う
   const ym = title.match(/[（(][^）)]*?(\d{4})[^）)]*[）)]/);
   const year = ym ? ym[1] : null;
   let fallback = null;
-  for (const v of queryVariants(title)) {
-    const cands = await wbsearch(v, lang);
-    if (!cands.length) continue;
-    const works = await filterWorkQids(cands.map(c => c.id));
-    // 作品型を優先。さらに年ヒントが説明文に一致する候補を最優先にする
-    const score = c => {
-      if (!works.has(c.id)) return 2;
-      return (year && (c.description || "").includes(year)) ? -1 : 0;
-    };
-    const ranked = cands.slice().sort((a, b) => score(a) - score(b));
-    const top = ranked[0];
-    const info = { qid: top.id, label: top.label || "", description: top.description || "",
-                   is_work: works.has(top.id), matched_query: v };
-    if (works.size) return info;
-    if (!fallback) fallback = info;
+
+  // Tier 1: Wikipedia記事タイトルとして完全一致で解決（記事名そのもの・括弧つきに強い）
+  for (const wl of [lang, "en"]) {
+    const qid = await resolveViaWiki(title, wl);
+    if (qid && (await filterWorkQids([qid])).has(qid)) return infoFromQid(qid, lang, title);
   }
+
+  // Wikidata検索を試す共通処理（作品型優先・年ヒスト考慮）
+  const tryWb = async variants => {
+    for (const v of variants) {
+      const cands = await wbsearch(v, lang);
+      if (!cands.length) continue;
+      const works = await filterWorkQids(cands.map(c => c.id));
+      const score = c => !works.has(c.id) ? 2 : ((year && (c.description || "").includes(year)) ? -1 : 0);
+      const ranked = cands.slice().sort((a, b) => score(a) - score(b));
+      const top = ranked[0];
+      const info = { qid: top.id, label: top.label || "", description: top.description || "",
+                     is_work: works.has(top.id), matched_query: v };
+      if (works.size) return info;
+      if (!fallback) fallback = info;
+    }
+    return null;
+  };
+
+  // Tier 2: Wikidata検索（フル＋区切り表記ゆれ。略称・別名にも強い。トリミングはまだしない）
+  let r = await tryWb(normalizedVariants(title));
+  if (r) return r;
+
+  // Tier 3: Wikipedia全文検索（中黒・スペースの揺れに強い。例「スターウォーズ」→「スター・ウォーズ」）
+  const target = normKey(stripParen(title));
+  for (const wl of [lang, "en"]) {
+    const hits = await searchWiki(title, wl);
+    if (!hits.length) continue;
+    const works = await filterWorkQids(hits.map(h => h.qid));
+    const wlist = hits.filter(h => works.has(h.qid));
+    if (!wlist.length) continue;
+    // 記事名が入力と（区切り無視で）一致＞前方一致＞検索順位、の順で選ぶ
+    const score = h => {
+      const n = normKey(h.title);
+      if (n === target) return 0;
+      if (n.startsWith(target) || target.startsWith(n)) return 1;
+      return 2;
+    };
+    wlist.sort((a, b) => score(a) - score(b));
+    return infoFromQid(wlist[0].qid, lang, title);
+  }
+
+  // Tier 4: 最後の手段（空白で末尾を削る副題対策）
+  r = await tryWb(trimVariants(title));
+  if (r) return r;
+
   return fallback;
 }
 
