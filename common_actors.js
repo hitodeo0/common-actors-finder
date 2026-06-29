@@ -455,7 +455,10 @@ async function filterHumans(titles, wikiLang, labelLang) {
 
 // 本文のキャスト欄＝「出演」、声/CVマーカーや日本語吹替＝「声優」に振り分けて抽出。
 // 吹替声優は出演から除外する（俳優ではなく日本語版の声優なので）。
-async function getPeopleWikipedia(title, wikiLang, labelLang) {
+// want = { cast, voice } で、選択された役割だけを抽出する（既定は両方）。
+// Wikipediaから取れる役割は「出演」と「声優」のみ。監督等はWikidata側で扱う。
+async function getPeopleWikipedia(title, wikiLang, labelLang, want) {
+  want = want || { cast: true, voice: true };
   const cfg = WIKI_CONFIG[wikiLang]; if (!cfg) return new Map();
   const text = await getWikitext(title, wikiLang); if (!text) return new Map();
   const { links: castLinks, subs, dubSecLinks } = extractCastLinks(text, cfg);
@@ -470,15 +473,18 @@ async function getPeopleWikipedia(title, wikiLang, labelLang) {
   for (const t of dubLinks) castLinks.delete(t);
 
   const out = new Map();
-  const cast = await filterHumans([...castLinks], wikiLang, labelLang);
-  for (const [pq, name] of cast) out.set(pq, { name, roles: new Set(["出演"]) });
-  // 声/CV・インライン吹替・吹替セクション（表）を声優として統合
-  //（吹替セクションは俳優も混ざるが、俳優はキャスト節の出演を残したまま声優も付く）
-  const voiceAll = [...new Set([...voiceLinks, ...dubLinks, ...dubSecLinks])];
-  const voice = await filterHumans(voiceAll, wikiLang, labelLang);
-  for (const [pq, name] of voice) {
-    if (out.has(pq)) out.get(pq).roles.add("声優");
-    else out.set(pq, { name, roles: new Set(["声優"]) });
+  if (want.cast) {
+    const cast = await filterHumans([...castLinks], wikiLang, labelLang);
+    for (const [pq, name] of cast) out.set(pq, { name, roles: new Set(["出演"]) });
+  }
+  if (want.voice) {
+    // 声/CV・インライン吹替・吹替セクション（表）を声優として統合
+    const voiceAll = [...new Set([...voiceLinks, ...dubLinks, ...dubSecLinks])];
+    const voice = await filterHumans(voiceAll, wikiLang, labelLang);
+    for (const [pq, name] of voice) {
+      if (out.has(pq)) out.get(pq).roles.add("声優");
+      else out.set(pq, { name, roles: new Set(["声優"]) });
+    }
   }
   return out;
 }
@@ -496,13 +502,17 @@ async function collectPeople(qid, title, lang, wikiLangs, alwaysWiki, props, onS
   const people = await getPeopleWikidata(qid, lang, props, true);
   // 取得元は {text, url} で持つ（表示時にリンク化）
   const sources = [{ text: "Wikidata", url: `https://www.wikidata.org/wiki/${qid}` }];
-  if (wikiLangs.length && (alwaysWiki || people.size < WEAK_THRESHOLD)) {
+  // Wikipediaから補える役割は「出演(P161)」「声優(P725)」のみ。選択に合わせる
+  const want = { cast: props.some(p => p[0] === "P161"),
+                 voice: props.some(p => p[0] === "P725") };
+  if (wikiLangs.length && (want.cast || want.voice) &&
+      (alwaysWiki || people.size < WEAK_THRESHOLD)) {
     const sites = await getSitelinks(qid, wikiLangs);
     for (const wl of wikiLangs) {
       const wt = sites[wl] || (wl === lang ? title : null);
       if (!wt) continue;
       onStatus(`「${title}」Wikipedia(${wl})解析中`);
-      const found = await getPeopleWikipedia(wt, wl, lang);
+      const found = await getPeopleWikipedia(wt, wl, lang, want);
       mergePeople(people, found);
       if (found.size) sources.push({
         text: `Wikipedia(${wl})`,
