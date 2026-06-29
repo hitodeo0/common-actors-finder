@@ -1,7 +1,6 @@
 "use strict";
 /*
  * common_actors.js — 共通出演者ファインダー（ブラウザ単体・サーバ不要）のロジック＋UI。
- * common_actors.html から <script src="common_actors.js"> で読み込む。
  * Wikidata(SPARQL/Action API)・各言語版WikipediaにCORSで直接アクセスする。
  */
 
@@ -379,7 +378,8 @@ async function collectPeople(qid, title, lang, wikiLangs, alwaysWiki, props, onS
       const found = await getPeopleWikipedia(wt, wl, lang);
       mergePeople(people, found);
       if (found.size) sources.push({
-        text: `Wikipedia(${wl}):${found.size}人`,
+        text: `Wikipedia(${wl})`,
+        note: `:${found.size}人`,
         url: `https://${wl}.wikipedia.org/wiki/${encodeURIComponent(wt.replace(/ /g, "_"))}`,
       });
     }
@@ -510,9 +510,12 @@ function render(data) {
       note += `<div class="warn">ℹ「${esc(w.input)}」→「${esc(w.matched_query)}」で再検索</div>`;
     if (w.is_work === false)
       note += `<div class="warn">⚠ 作品として認識できず別物の可能性</div>`;
-    const srcHtml = w.sources.map(s => s.url
-      ? `<a href="${s.url}" target="_blank">${esc(s.text)}</a>`
-      : esc(s.text)).join(", ");
+    const srcHtml = w.sources.map(s => {
+      const link = s.url
+        ? `<a href="${s.url}" target="_blank">${esc(s.text)}</a>`
+        : esc(s.text);
+      return link + (s.note ? esc(s.note) : "");   // 「:n人」はリンク外
+    }).join(", ");
     h += `<tr><td>${i + 1}</td><td>${esc(w.label)} `
        + `<a class="qid" href="https://www.wikidata.org/wiki/${w.qid}" target="_blank">${w.qid}</a>`
        + `<div class="muted">${esc(w.description || "")}</div>${note}</td>`
