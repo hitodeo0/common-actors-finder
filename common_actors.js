@@ -49,8 +49,10 @@ const WIKI_CONFIG = {
     infobox: /^\s*\|\s*(出演者|声の出演|声優|ナレーター|主演)\s*=/,
     // 声優マーカー（アニメ等）。「演」は"演じる"＝出演の意味なので含めない
     va: /(?:声(?:優)?|CV|cv)\s*[-‐–—−:：]\s*((?:\[\[[^\]]+\]\][^\[\n]{0,4}){1,6})/g,
-    // 日本語吹替の声優マーカー。出演から除外して声優扱いにする
+    // 日本語吹替の声優マーカー（インライン「吹替 - [[名]]」）。出演から除外して声優扱い
     dub: /(?:日本語吹替|吹替え?|吹き替え)\s*[-‐–—−:：]\s*((?:\[\[[^\]]+\]\][^\[\n]{0,10}){1,4})/g,
+    // 「== 日本語吹き替え ==」等の見出し（表形式の吹替表）。中の人物は声優として拾う
+    dubSection: /(吹替|吹き替え)/,
     subKw: ["登場人物", "キャラクター"],
     ns: /^(Category|カテゴリ|File|ファイル|画像|Image|Template|Wikipedia|Help|Portal|プロジェクト|特別):/i,
   },
@@ -186,22 +188,79 @@ async function filterWorkQids(qids) {
 
 function queryVariants(title) {
   title = title.trim();
-  const variants = [title];
-  const parts = title.split(/[\s　・:：~〜/／–—-]+/).filter(Boolean);
-  for (let k = parts.length - 1; k > 0; k--) {
-    const v = parts.slice(0, k).join(" ");
-    if (v && !variants.includes(v)) variants.push(v);
+  const variants = [];
+  const add = s => { s = (s || "").trim(); if (s && !variants.includes(s)) variants.push(s); };
+
+  // 末尾の曖昧さ回避括弧を除去:「X (2009年の映画)」「X（アニメ）」→「X」
+  let base = title;
+  for (;;) {
+    const stripped = base.replace(/[（(][^（）()]*[）)]\s*$/, "").trim();
+    if (stripped === base) break;
+    base = stripped;
   }
+
+  add(title);            // 原文（括弧つきのまま）
+  add(base);             // 括弧を除去した形
+  // 区切り文字（/ ／ ・ : ：）の表記ゆれを吸収（例: アベンジャーズ/エンドゲーム → ・形）
+  const SEP = /[/／・:：]/g;
+  add(base.replace(SEP, "・"));
+  add(base.replace(SEP, "/"));
+  add(base.replace(SEP, " "));
+  add(base.replace(SEP, ""));
+  // 最後の手段: 空白で区切って末尾語を順に落とす（副題対策。/ や ・ では割らない）
+  const parts = base.split(/[\s　]+/).filter(Boolean);
+  for (let k = parts.length - 1; k > 0; k--) add(parts.slice(0, k).join(" "));
   return variants;
 }
 
+// Wikipedia記事タイトル → Wikidata QID（曖昧さ回避括弧つきの記事名も正確に解決）
+async function resolveViaWiki(title, wikiLang) {
+  const url = apiURL(`https://${wikiLang}.wikipedia.org/w/api.php`, {
+    action: "query", titles: title, prop: "pageprops",
+    ppprop: "wikibase_item", redirects: 1, formatversion: 2 });
+  const j = await getJSON(url);
+  const pages = (j.query && j.query.pages) || [];
+  if (!pages.length || pages[0].missing) return null;
+  return (pages[0].pageprops && pages[0].pageprops.wikibase_item) || null;
+}
+
+async function getEntityInfo(qid, lang) {
+  const url = apiURL(WD_API, { action: "wbgetentities", ids: qid,
+    props: "labels|descriptions", languages: `${lang}|en` });
+  const j = await getJSON(url);
+  const e = (j.entities || {})[qid] || {};
+  const lbl = ((e.labels && (e.labels[lang] || e.labels.en)) || {}).value || qid;
+  const dsc = ((e.descriptions && (e.descriptions[lang] || e.descriptions.en)) || {}).value || "";
+  return { label: lbl, description: dsc };
+}
+
 async function resolveQid(title, lang) {
+  // 1) まず Wikipedia 記事タイトルとして直接解決（記事名そのもの・曖昧さ回避括弧つきに強い）。
+  //    記事が「作品」型のときだけ採用し、キャラクター等の場合は通常検索へ回す。
+  for (const wl of [lang, "en"]) {
+    const qid = await resolveViaWiki(title, wl);
+    if (qid && (await filterWorkQids([qid])).has(qid)) {
+      const info = await getEntityInfo(qid, lang);
+      return { qid, label: info.label, description: info.description,
+               is_work: true, matched_query: title };
+    }
+  }
+
+  // 2) Wikidata検索（別名・略称・表記ゆれに強い）
+  // 「(2009年の映画)」等の括弧内にある年を、候補の絞り込みヒントに使う
+  const ym = title.match(/[（(][^）)]*?(\d{4})[^）)]*[）)]/);
+  const year = ym ? ym[1] : null;
   let fallback = null;
   for (const v of queryVariants(title)) {
     const cands = await wbsearch(v, lang);
     if (!cands.length) continue;
     const works = await filterWorkQids(cands.map(c => c.id));
-    const ranked = cands.slice().sort((a, b) => (works.has(a.id) ? 0 : 1) - (works.has(b.id) ? 0 : 1));
+    // 作品型を優先。さらに年ヒントが説明文に一致する候補を最優先にする
+    const score = c => {
+      if (!works.has(c.id)) return 2;
+      return (year && (c.description || "").includes(year)) ? -1 : 0;
+    };
+    const ranked = cands.slice().sort((a, b) => score(a) - score(b));
     const top = ranked[0];
     const info = { qid: top.id, label: top.label || "", description: top.description || "",
                    is_work: works.has(top.id), matched_query: v };
@@ -272,7 +331,7 @@ function cleanLinkTarget(raw, cfg) {
 const isSub = (name, cfg) => cfg.subKw.some(k => name.includes(k));
 
 function extractCastLinks(text, cfg) {
-  const links = new Set(), subs = new Set();
+  const links = new Set(), subs = new Set(), dubSecLinks = new Set();
   let inField = false;
   for (const line of text.split("\n")) {
     if (cfg.infobox.test(line)) inField = true;
@@ -284,7 +343,8 @@ function extractCastLinks(text, cfg) {
   const sections = text.split(/^(={2,}\s*.+?\s*={2,})\s*$/m);
   for (let i = 1; i < sections.length; i += 2) {
     const heading = sections[i], body = sections[i + 1] || "";
-    const relevant = cfg.section.test(heading);
+    const isDub = cfg.dubSection && cfg.dubSection.test(heading);  // 吹替セクション
+    const relevant = cfg.section.test(heading) || isDub;
     const target = relevant ? body : heading + body;
     for (const m of target.matchAll(MAIN_TMPL)) {
       const name = m[1].split("#")[0].trim();
@@ -293,10 +353,11 @@ function extractCastLinks(text, cfg) {
     for (const m of target.matchAll(WIKILINK)) {
       const t = cleanLinkTarget(m[1], cfg); if (!t) continue;
       if (isSub(t, cfg)) subs.add(t);
+      else if (isDub) dubSecLinks.add(t);   // 吹替表の人物は声優候補へ
       else if (relevant) links.add(t);
     }
   }
-  return { links, subs };
+  return { links, subs, dubSecLinks };
 }
 
 // マーカー（声/CV や 吹替 など）の直後に並ぶwikilinkを抽出する汎用関数
@@ -333,21 +394,23 @@ async function filterHumans(titles, wikiLang, labelLang) {
 async function getPeopleWikipedia(title, wikiLang, labelLang) {
   const cfg = WIKI_CONFIG[wikiLang]; if (!cfg) return new Map();
   const text = await getWikitext(title, wikiLang); if (!text) return new Map();
-  const { links: castLinks, subs } = extractCastLinks(text, cfg);
+  const { links: castLinks, subs, dubSecLinks } = extractCastLinks(text, cfg);
   const voiceLinks = extractMarkedLinks(text, cfg.va, cfg);     // 声/CV由来
   for (const sub of [...subs].slice(0, 5)) {
     const st = await getWikitext(sub, wikiLang);
     if (st) for (const x of extractMarkedLinks(st, cfg.va, cfg)) voiceLinks.add(x);
   }
-  const dubLinks = extractMarkedLinks(text, cfg.dub, cfg);      // 日本語吹替由来
-  // 声優・吹替は出演から除外（キャスト欄に紛れていても声優として扱う）
+  const dubLinks = extractMarkedLinks(text, cfg.dub, cfg);      // インライン吹替由来
+  // インラインの声優/吹替は出演から除外（キャスト欄に紛れていても声優として扱う）
   for (const t of voiceLinks) castLinks.delete(t);
   for (const t of dubLinks) castLinks.delete(t);
 
   const out = new Map();
   const cast = await filterHumans([...castLinks], wikiLang, labelLang);
   for (const [pq, name] of cast) out.set(pq, { name, roles: new Set(["出演"]) });
-  const voiceAll = [...new Set([...voiceLinks, ...dubLinks])];
+  // 声/CV・インライン吹替・吹替セクション（表）を声優として統合
+  //（吹替セクションは俳優も混ざるが、俳優はキャスト節の出演を残したまま声優も付く）
+  const voiceAll = [...new Set([...voiceLinks, ...dubLinks, ...dubSecLinks])];
   const voice = await filterHumans(voiceAll, wikiLang, labelLang);
   for (const [pq, name] of voice) {
     if (out.has(pq)) out.get(pq).roles.add("声優");
@@ -401,8 +464,12 @@ async function compare(titles, roleKeys, wikiLangs, lazy, lang, onStatus) {
   for (const v0 of titles) {
     const value = v0.trim();
     let info;
-    if (/^Q\d+$/i.test(value)) info = { qid: value.toUpperCase(), label: value.toUpperCase(), description: "(QID指定)" };
-    else { onStatus(`「${value}」を検索中`); info = await resolveQid(value, lang); }
+    if (/^Q\d+$/i.test(value)) {
+      const qid = value.toUpperCase();
+      onStatus(`${qid} を取得中`);
+      const ei = await getEntityInfo(qid, lang);   // QID入力でも日本語名を表示
+      info = { qid, label: ei.label, description: ei.description };
+    } else { onStatus(`「${value}」を検索中`); info = await resolveQid(value, lang); }
     if (!info || !info.qid) throw new Error("作品が見つかりません: " + value);
     info.input = value;
     works.push(info);
