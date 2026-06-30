@@ -628,7 +628,7 @@ const esc = s => (s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", 
 
 async function run() {
   const titles = [...worksEl.querySelectorAll("input")].map(i => i.value.trim()).filter(Boolean);
-  if (titles.length < 2) { setStatus("作品を2つ以上入力してください", true); return; }
+  if (titles.length < 1) { setStatus("作品を1つ以上入力してください", true); return; }
   const roles = getChecked(".role"); if (!roles.length) roles.push("cast");
   setStatus('<span class="spin"></span>準備中…');
   document.getElementById("run").disabled = true;
@@ -664,12 +664,17 @@ function render(data) {
   });
   h += "</table></div>";
 
+  const single = data.works.length === 1;   // 1作品なら「一覧」、複数なら「共通」
   if (!data.common.length) {
-    h += `<div class="card">${data.works.length}作品すべてに共通する人物は見つかりませんでした。</div>`;
+    h += `<div class="card">${single ? "出演者・関係者が見つかりませんでした。"
+      : data.works.length + "作品すべてに共通する人物は見つかりませんでした。"}</div>`;
   } else {
-    h += `<div class="card"><label class="fld">${data.works.length}作品すべてに共通：`
-       + `${data.common.length}人</label><table><tr><th>名前</th>`;
-    data.works.forEach((w, i) => h += `<th>作品${i + 1}</th>`);
+    const heading = single
+      ? `出演者・関係者一覧：${data.common.length}人`
+      : `${data.works.length}作品すべてに共通：${data.common.length}人`;
+    h += `<div class="card"><label class="fld">${heading}</label><table><tr><th>名前</th>`;
+    if (single) h += "<th>役割</th>";
+    else data.works.forEach((w, i) => h += `<th>作品${i + 1}</th>`);
     h += "</tr>";
     data.common.forEach(p => {
       h += `<tr><td>${esc(p.name)} `
